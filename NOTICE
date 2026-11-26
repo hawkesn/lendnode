@@ -1,0 +1,12 @@
+lendnode
+
+lendnode will adapt the setTaint, drain and adopt code from nodenap.
+No nodenap code is included yet.
+
+  Project:   nodenap
+  Source:    https://github.com/rothgar/nodenap
+  Reviewed:  commit e2f9d0837fe21053d040b8510ca5ee0dd646fa6a
+  Licence:   Apache License 2.0
+  Author:    Justin Garrison (rothgar), the author of all commits at that revision
+
+At that revision nodenap has no NOTICE file and states no copyright holder.

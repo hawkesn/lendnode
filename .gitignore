@@ -1,0 +1,11 @@
+# Build artifacts
+bin/
+dist/
+*.test
+*.out
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
