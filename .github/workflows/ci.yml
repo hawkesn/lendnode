@@ -10,8 +10,10 @@ permissions:
 
 jobs:
   go:
-    # GitHub-hosted only: this repo is public, so fork code must never reach a self-hosted runner.
-    runs-on: ubuntu-latest
+    # Self-hosted runners only. Pull requests from forks are skipped; a maintainer
+    # re-runs a wanted change from a branch in this repository.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: moonlighter-ci
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -20,3 +22,23 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+  cross:
+    # Compile checks for every supported target. Tests run on Linux only, in the job above.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: moonlighter-ci
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, darwin, linux]
+        goarch: [amd64, arm64]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
