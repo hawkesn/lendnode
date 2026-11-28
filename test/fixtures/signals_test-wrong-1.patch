@@ -1,0 +1,49 @@
+diff --git a/signals.go b/signals.go
+new file mode 100644
+index 0000000..4f5f05f
+--- /dev/null
++++ b/signals.go
+@@ -0,0 +1,26 @@
++package moonlighter
++
++import (
++	"fmt"
++	"time"
++)
++
++// IdleSince is the time since the last input, from two 32-bit millisecond tick counts. The tick
++// count wraps every 49.7 days; unsigned subtraction wraps with it, so the result stays right.
++func IdleSince(tick, last uint32) time.Duration {
++	return time.Duration(int64(tick)-int64(last)) * time.Millisecond
++}
++
++// FullScreenGame reads a SHQueryUserNotificationState value: 2 busy (a full-screen app), 3 Direct3D
++// full screen and 4 presentation mode count as a game. Controller input never resets idle, so this
++// is the game signal; the caller puts it in Signals.OwnerInput.
++func FullScreenGame(state uint32) bool { return state >= 2 && state <= 4 }
++
++// FormatSignals is the text of the check subcommand: one line per signal, then the error if any.
++func FormatSignals(s Signals) string {
++	out := fmt.Sprintf("idle: %s\ngame: %t\nfree_ram: %d MiB\n", s.Idle, s.OwnerInput, s.FreeRAM>>20)
++	if s.Err != nil {
++		out += "error: " + s.Err.Error() + "\n"
++	}
++	return out
++}
+diff --git a/signals_other.go b/signals_other.go
+new file mode 100644
+index 0000000..c84b22c
+--- /dev/null
++++ b/signals_other.go
+@@ -0,0 +1,11 @@
++//go:build !windows
++
++package moonlighter
++
++import "errors"
++
++// ReadSignals reads the owner's signals. Only Windows has a reader; elsewhere it fails, so
++// Decide never lends.
++func ReadSignals() Signals {
++	return Signals{Err: errors.New("signals are only read on Windows")}
++}
