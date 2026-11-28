@@ -20,6 +20,20 @@ func MergeWSLConfig(config string) string {
 		if in && header < 0 {
 			header = i
 		}
+		if in && replaced && !strings.HasPrefix(trimmed, "[") &&
+			!strings.HasPrefix(trimmed, ";") && !strings.HasPrefix(trimmed, "#") {
+			// In an ini the last occurrence wins, so a later
+			// networkingMode line must be rewritten too or the mode
+			// could still come up non-mirrored.
+			dup, _, _ := strings.Cut(trimmed, "=")
+			if strings.EqualFold(strings.TrimSpace(dup), "networkingMode") {
+				dupSet := "networkingMode=mirrored"
+				if strings.HasSuffix(line, "\r") {
+					dupSet += "\r"
+				}
+				lines[i] = dupSet
+			}
+		}
 		if !in || replaced || strings.HasPrefix(trimmed, "[") ||
 			strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#") {
 			continue
