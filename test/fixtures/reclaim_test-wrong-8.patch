@@ -1,0 +1,99 @@
+diff --git a/reclaim.go b/reclaim.go
+new file mode 100644
+index 0000000..b920a67
+--- /dev/null
++++ b/reclaim.go
+@@ -0,0 +1,93 @@
++package moonlighter
++
++import (
++	"context"
++	"errors"
++	"time"
++)
++
++// Pod is one pod on the lent node.
++type Pod struct {
++	Namespace, Name string
++	DaemonSet       bool
++}
++
++// NodeState is what the Node records. Since is when the running reclaim began (zero when none);
++// Ours is true only when moonlighter itself made the cordon.
++type NodeState struct {
++	Unschedulable, Ours bool
++	Since               time.Time
++}
++
++// Cluster is the node's own view of the cluster. Evict takes no grace: the pod keeps its own.
++type Cluster interface {
++	Node(ctx context.Context) (NodeState, error)
++	Cordon(ctx context.Context, now time.Time) error
++	Uncordon(ctx context.Context) error
++	Pods(ctx context.Context) ([]Pod, error)
++	Evict(ctx context.Context, p Pod) error
++}
++
++// Agent lends and reclaims the node. LowerPriority lowers the running unit's CPU priority.
++type Agent struct {
++	Cluster       Cluster
++	LowerPriority func(ctx context.Context) error
++}
++
++// Tick lends or reclaims, as Decide says.
++func (a Agent) Tick(ctx context.Context, s Settings, sig Signals, now time.Time) error {
++	if lend, _ := Decide(s, sig, now); lend {
++		return a.Lend(ctx)
++	}
++	return a.Reclaim(ctx, s, now)
++}
++
++// Lend uncordons the node, but only a cordon moonlighter made.
++func (a Agent) Lend(ctx context.Context) error {
++	st, err := a.Cluster.Node(ctx)
++	if err != nil || st.Unschedulable && !st.Ours || !st.Unschedulable && st.Since.IsZero() {
++		return err
++	}
++	return a.Cluster.Uncordon(ctx)
++}
++
++// Reclaim cordons the node, then applies the leave mode. It never uncordons.
++func (a Agent) Reclaim(ctx context.Context, s Settings, now time.Time) error {
++	st, err := a.Cluster.Node(ctx)
++	if err != nil {
++		return err
++	}
++	if !st.Unschedulable || st.Since.IsZero() {
++		if err := a.Cluster.Cordon(ctx, now); err != nil {
++			return err
++		}
++		st.Since = now
++	}
++	switch s.LeaveMode {
++	case LeaveSlow:
++		return a.lower(ctx)
++	case LeaveNow:
++		if err := a.lower(ctx); err != nil {
++			return err
++		}
++	case LeaveFinish:
++		if now.Sub(st.Since) < s.MaxWait {
++			return nil
++		}
++	}
++	pods, err := a.Cluster.Pods(ctx)
++	var errs []error
++	for _, p := range pods {
++		if !p.DaemonSet {
++			errs = append(errs, a.Cluster.Evict(ctx, p))
++		}
++	}
++	return errors.Join(append(errs, err)...)
++}
++
++func (a Agent) lower(ctx context.Context) error {
++	if a.LowerPriority == nil {
++		return nil
++	}
++	return a.LowerPriority(ctx)
++}
