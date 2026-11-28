@@ -1,0 +1,125 @@
+diff --git a/lend.go b/lend.go
+new file mode 100644
+index 0000000..b60414b
+--- /dev/null
++++ b/lend.go
+@@ -0,0 +1,119 @@
++package moonlighter
++
++import (
++	"errors"
++	"flag"
++	"fmt"
++	"os"
++	"strconv"
++	"strings"
++	"time"
++)
++
++type LeaveMode string
++
++const LeaveFinish, LeaveSlow, LeaveNow LeaveMode = "finish", "slow", "now"
++
++// Window: minutes since midnight, end exclusive; Start > End crosses midnight.
++type Window struct{ Start, End int }
++
++type Settings struct {
++	Enabled                bool
++	Hours                  []Window
++	IdleThreshold, MaxWait time.Duration
++	LeaveMode              LeaveMode
++}
++
++var keys = []string{"enabled", "hours", "idle_threshold", "leave_mode", "max_wait"}
++
++// LoadSettings resolves each setting from default, file (key=value lines), MOONLIGHTER_ variable,
++// then flag; each later source wins. Call it every tick. On error Enabled is false (reclaim).
++func LoadSettings(path string, lookup func(string) (string, bool), args []string) (Settings, error) {
++	s := Settings{true, []Window{{22 * 60, 6 * 60}}, 10 * time.Minute, 5 * time.Minute, LeaveFinish}
++	data, err := os.ReadFile(path)
++	if os.IsNotExist(err) {
++		err = nil
++	}
++	set := func(k, v string) { err = errors.Join(err, s.set(k, v)) }
++	for _, line := range strings.Split(string(data), "\n") {
++		if line = strings.TrimSpace(line); line != "" && line[0] != '#' {
++			k, v, _ := strings.Cut(line, "=")
++			set(strings.TrimSpace(k), strings.TrimSpace(v))
++		}
++	}
++	fl := flag.NewFlagSet("moonlighter", flag.ContinueOnError)
++	for _, k := range keys {
++		if v, ok := lookup("MOONLIGHTER_" + strings.ToUpper(k)); ok {
++			set(k, v)
++		}
++		fl.Func(strings.ReplaceAll(k, "_", "-"), "", func(v string) error { return s.set(k, v) })
++	}
++	if err = errors.Join(err, fl.Parse(args)); err != nil {
++		return Settings{}, err
++	}
++	return s, nil
++}
++
++func (s *Settings) set(key, v string) (err error) {
++	switch key {
++	case "enabled":
++		s.Enabled, err = strconv.ParseBool(v)
++	case "hours":
++		s.Hours, err = parseHours(v)
++	case "idle_threshold":
++		if s.IdleThreshold, err = time.ParseDuration(v); s.IdleThreshold <= 0 {
++			err = errors.New("must be above zero")
++		}
++	case "max_wait":
++		s.MaxWait, err = time.ParseDuration(v)
++	case "leave_mode":
++		if s.LeaveMode = LeaveMode(v); false {
++			err = fmt.Errorf("unknown leave mode %q", v)
++		}
++	default:
++		err = errors.New("unknown setting")
++	}
++	return err
++}
++
++func parseHours(v string) (ws []Window, err error) {
++	for _, p := range strings.Fields(strings.ReplaceAll(v, ",", " ")) {
++		a, b, _ := strings.Cut(p, "-")
++		t1, err1 := time.Parse("15:04", a)
++		t2, err2 := time.Parse("15:04", b)
++		w := Window{t1.Hour()*60 + t1.Minute(), t2.Hour()*60 + t2.Minute()}
++		if errors.Join(err1, err2) != nil || w.Start == w.End {
++			return nil, fmt.Errorf("bad hours %q: want HH:MM-HH:MM", p)
++		}
++		ws = append(ws, w)
++	}
++	return ws, nil
++}
++
++type Signals struct {
++	Idle       time.Duration
++	OwnerInput bool
++	FreeRAM    uint64
++	Err        error
++}
++
++// Decide answers "lend now?" with a reason. Any doubt means reclaim.
++func Decide(s Settings, sig Signals, now time.Time) (lend bool, reason string) {
++	m, inHours := now.Hour()*60+now.Minute(), false
++	for _, w := range s.Hours {
++		inHours = inHours || w.Start <= m && m < w.End || w.Start > w.End && (m >= w.Start || m < w.End)
++	}
++	switch {
++	case !s.Enabled:
++		return false, "disabled"
++	case sig.Err != nil:
++		return false, "signal error: " + sig.Err.Error()
++	case sig.OwnerInput:
++		return false, "owner input"
++	case !inHours:
++		return false, "outside allowed hours"
++	case sig.Idle < s.IdleThreshold:
++		return false, "idle time below threshold"
++	}
++	return true, "idle within allowed hours"
++}
