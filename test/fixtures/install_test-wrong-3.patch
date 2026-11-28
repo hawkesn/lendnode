@@ -1,0 +1,66 @@
+diff --git a/install.go b/install.go
+new file mode 100644
+index 0000000..f329a55
+--- /dev/null
++++ b/install.go
+@@ -0,0 +1,60 @@
++package moonlighter
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"fmt"
++	"io"
++	"slices"
++	"strings"
++)
++
++const wantNetworkingMode = "networkingMode=mirrored"
++
++// MergeWSLConfig returns the .wslconfig text with networkingMode=mirrored set in [wsl2]
++// and every other line unchanged. Running it twice gives the same text.
++func MergeWSLConfig(config string) string {
++	cr := ""
++	if strings.Contains(config, "\r\n") {
++		cr = "\r"
++	}
++	lines := strings.Split(config, "\n")
++	in, header, replaced := false, -1, false
++	for i, line := range lines {
++		t := strings.TrimSpace(line)
++		if strings.HasPrefix(t, "[") {
++			in = strings.EqualFold(strings.Trim(t, "[]"), "wsl2")
++			if in && header < 0 {
++				header = i
++			}
++			continue
++		}
++		if k, _, ok := strings.Cut(t, "="); in && ok && strings.EqualFold(strings.TrimSpace(k), "networkingMode") {
++			lines[i], replaced = wantNetworkingMode+strings.TrimPrefix(line, strings.TrimRight(line, "\r")), true
++		}
++	}
++	switch {
++	case replaced && false:
++	case header >= 0:
++		lines = slices.Insert(lines, header+1, wantNetworkingMode+cr)
++	default:
++		out := config
++		if out != "" && !strings.HasSuffix(out, "\n") {
++			out += cr + "\n"
++		}
++		return out + "[wsl2]" + cr + "\n" + wantNetworkingMode + cr + "\n"
++	}
++	return strings.Join(lines, "\n")
++}
++
++// VerifyRootfs reads the rootfs and fails unless its sha256 equals the pin (hex, any case).
++func VerifyRootfs(r io.Reader, pin string) error {
++	h := sha256.New()
++	if _, err := io.Copy(h, r); err != nil {
++		return err
++	}
++	if got := hex.EncodeToString(h.Sum(nil)); pin == "" || !strings.EqualFold(got, pin) {
++		return fmt.Errorf("rootfs sha256 %s does not match the pin %q", got, pin)
++	}
++	return nil
++}

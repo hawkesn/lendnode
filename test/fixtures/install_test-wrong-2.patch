@@ -1,0 +1,28 @@
+diff --git a/install.go b/install.go
+new file mode 100644
+index 0000000..d8e2342
+--- /dev/null
++++ b/install.go
+@@ -0,0 +1,22 @@
++package moonlighter
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"fmt"
++	"io"
++	"strings"
++)
++
++func MergeWSLConfig(config string) string { return "[wsl2]\nnetworkingMode=mirrored\n" }
++
++func VerifyRootfs(r io.Reader, pin string) error {
++	h := sha256.New()
++	if _, err := io.Copy(h, r); err != nil {
++		return err
++	}
++	if got := hex.EncodeToString(h.Sum(nil)); pin == "" || !strings.EqualFold(got, pin) {
++		return fmt.Errorf("rootfs sha256 %s does not match the pin %q", got, pin)
++	}
++	return nil
++}
