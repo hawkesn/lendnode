@@ -1,0 +1,80 @@
+diff --git a/preflight.go b/preflight.go
+new file mode 100644
+index 0000000..714ab5f
+--- /dev/null
++++ b/preflight.go
+@@ -0,0 +1,74 @@
++package moonlighter
++
++import (
++	"fmt"
++	"strconv"
++	"strings"
++)
++
++// WSLInstallCommand is the one command printed when WSL is absent.
++const WSLInstallCommand = "wsl --install --no-distribution"
++
++// MinWSLMemoryBytes is one verify pod plus the agent, about 12 GiB.
++const MinWSLMemoryBytes = int64(12) << 30
++
++// Host is what the preflight check knows about the machine.
++type Host struct {
++	WSLInstalled bool
++	HostRAMBytes int64
++	WSLConfig    string // text of the owner's .wslconfig, empty when absent
++}
++
++// PreflightError says why a machine cannot host the distro.
++type PreflightError struct {
++	Reason  string
++	Command string // command the owner runs to fix it, empty when none
++}
++
++func (e *PreflightError) Error() string {
++	if e.Command != "" {
++		return e.Reason + "; run as admin, then reboot: " + e.Command
++	}
++	return e.Reason
++}
++
++// Preflight returns nil when the machine can host the distro.
++func Preflight(h Host) error {
++	if !h.WSLInstalled {
++		return &PreflightError{Reason: "WSL is not installed", Command: WSLInstallCommand}
++	}
++	if c := WSLMemoryCap(h.WSLConfig, h.HostRAMBytes); c < MinWSLMemoryBytes {
++		return &PreflightError{Reason: fmt.Sprintf("WSL memory cap %d bytes is below the 12 GiB a verify pod and the agent need", c)}
++	}
++	return nil
++}
++
++// WSLMemoryCap reads memory= from the [wsl2] section of a .wslconfig. WSL
++// defaults to half of host RAM when the key is absent or invalid.
++func WSLMemoryCap(cfg string, hostRAM int64) int64 {
++	def, in := hostRAM/2, false
++	for _, line := range strings.Split(cfg, "\n") {
++		line = strings.TrimSpace(line)
++		if strings.HasPrefix(line, "[") {
++			in = strings.EqualFold(line, "[wsl2]")
++			continue
++		}
++		k, v, ok := strings.Cut(line, "=")
++		if !in || !ok || !strings.TrimSpace(k) == "memory" {
++			continue
++		}
++		v = strings.ToUpper(strings.TrimSpace(v))
++		for _, u := range []struct {
++			s string
++			m int64
++		}{{"TB", 1 << 40}, {"GB", 1 << 30}, {"MB", 1 << 20}, {"KB", 1 << 10}, {"B", 1}} {
++			if n, ok := strings.CutSuffix(v, u.s); ok {
++				if x, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64); err == nil {
++					return x * u.m
++				}
++				break
++			}
++		}
++	}
++	return def
++}
